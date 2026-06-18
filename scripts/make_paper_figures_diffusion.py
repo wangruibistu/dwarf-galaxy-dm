@@ -81,42 +81,50 @@ Re = 0.28
 # Figure 1: Sculptor sigma_los(R) data + parametric model bands
 # ---------------------------------------------------------------------------
 def fig_sculptor_sigma():
-    h2h = np.load(TAB / "head_to_head_sculptor.npz", allow_pickle=True)
     fig, ax = plt.subplots(figsize=(6.2, 4.2))
     # data
     ax.errorbar(R_obs * 1000, np.sqrt(sig2_obs),
                 yerr=sig2_unc / (2 * np.sqrt(sig2_obs)),
                 fmt="o", color="k", capsize=3, ms=5, zorder=5, label="Sculptor (793 members)")
-    # representative best-fit curves (median of each posterior)
-    Rfine = np.linspace(R_obs.min(), R_obs.max(), 60)
-    # gNFW median params not stored; use representative fit per family on the fly
-    def fit_curve(menc_func, p0, bounds):
+    # smooth best-fit curves on a dense log grid; high n_r kills projection-quadrature jitter
+    Rfine = np.logspace(np.log10(R_obs.min()), np.log10(R_obs.max()), 200)
+    nb = int(len(R_obs))
+
+    def fit_curve(menc_func, p0, bounds, npar):
         from scipy.optimize import least_squares
         def resid(p):
-            pred = sigma_los2_from_Menc(R_obs, lambda r: menc_func(r, *p), Re_kpc=Re)
+            pred = sigma_los2_from_Menc(R_obs, lambda r: menc_func(r, *p),
+                                        Re_kpc=Re, n_r=400)
             return (pred - sig2_obs) / sig2_unc
-        r = least_squares(resid, p0, bounds=bounds, max_nfev=4000)
-        return r.x
-    pg = fit_curve(gnfw_menc, [8.0, -0.2, 0.6], ([5,-1.5,0],[10,1.5,1.5]))
-    pc = fit_curve(corenfw_menc, [8.0,-0.2,-0.5,1.0], ([5,-1.5,-2,0.3],[10,1.5,0.5,2.0]))
-    pb = fit_curve(burkert_menc, [8.0,-0.4], ([5,-1.5],[10,1.0]))
-    for menc, p, c, lab in [(gnfw_menc, pg, "#1f77b4", "gNFW fit"),
-                             (corenfw_menc, pc, "#2ca02c", "coreNFW fit"),
-                             (burkert_menc, pb, "#9467bd", "Burkert fit")]:
-        pred = sigma_los2_from_Menc(Rfine, lambda r: menc(r, *p), Re_kpc=Re)
-        ax.plot(Rfine * 1000, np.sqrt(pred), color=c, lw=1.6, label=lab)
+        r = least_squares(resid, p0, bounds=bounds, max_nfev=6000)
+        return r.x, float(np.sum(r.fun ** 2)) / (nb - npar)
+
+    pg, rg = fit_curve(gnfw_menc, [8.0, -0.2, 0.6], ([5,-1.5,0],[10,1.5,1.5]), 3)
+    pc, rc = fit_curve(corenfw_menc, [8.0,-0.2,-0.5,1.0], ([5,-1.5,-2,0.3],[10,1.5,0.5,2.0]), 4)
+    pb, rb = fit_curve(burkert_menc, [8.0,-0.4], ([5,-1.5],[10,1.0]), 2)
+    # the Abel projection has a 1/sqrt(r^2-R^2) singularity at the lower limit;
+    # the fixed-grid quadrature leaves high-frequency jitter on a finely sampled
+    # curve (physically sigma_los(R) is smooth). Savitzky-Golay removes that
+    # numerical noise for display only; the fit/likelihood are untouched.
+    from scipy.signal import savgol_filter
+    for menc, p, c, lab in [
+            (gnfw_menc, pg, "#1f77b4", rf"gNFW fit ($\chi^2_\nu={rg:.1f}$)"),
+            (corenfw_menc, pc, "#2ca02c", rf"coreNFW fit ($\chi^2_\nu={rc:.1f}$)"),
+            (burkert_menc, pb, "#9467bd", rf"Burkert fit ($\chi^2_\nu={rb:.1f}$)")]:
+        pred = sigma_los2_from_Menc(Rfine, lambda r: menc(r, *p), Re_kpc=Re, n_r=600)
+        sig_curve = savgol_filter(np.sqrt(pred), 31, 3)
+        ax.plot(Rfine * 1000, sig_curve, color=c, lw=1.6, label=lab)
     ax.set_xscale("log")
     ax.set_xlabel(r"projected radius $R$ [pc]")
     ax.set_ylabel(r"$\sigma_{\rm los}(R)$ [km s$^{-1}$]")
-    ax.set_title(f"Sculptor line-of-sight velocity dispersion "
-                 f"($v_{{\\rm sys}}={v_sys:.1f}$ km s$^{{-1}}$)")
     ax.legend(); ax.grid(alpha=0.3, ls=":")
     for i, n in zip(np.where(ok)[0], nbin[ok]):
         ax.annotate(f"{int(n)}", (10 ** binc[i], np.sqrt(sig2[i])),
                     textcoords="offset points", xytext=(0, 8),
                     ha="center", fontsize=6, color="grey")
     fig.savefig(FIG / "fig_sculptor_sigma.pdf"); fig.savefig(FIG / "fig_sculptor_sigma.png")
-    plt.close(fig); print("[fig] fig_sculptor_sigma")
+    plt.close(fig)
+    print(f"[fig] fig_sculptor_sigma  chi2/nu: gNFW={rg:.2f} coreNFW={rc:.2f} Burkert={rb:.2f}")
 
 
 # ---------------------------------------------------------------------------
@@ -154,7 +162,6 @@ def fig_library_gallery():
     ax.set_xlabel(r"$r$ [pc]"); ax.set_ylabel(r"$\log_{10}\,\rho(r)$ [$M_\odot$ kpc$^{-3}$]")
     ax.axvline(150, ls=":", c="k", alpha=0.5)
     ax.text(155, ax.get_ylim()[0] + 0.4, "150 pc", fontsize=7, rotation=90, va="bottom")
-    ax.set_title("Training-library halo profiles by channel")
     ax.legend(); ax.grid(alpha=0.3, ls=":")
     fig.savefig(FIG / "fig_library_gallery.pdf"); fig.savefig(FIG / "fig_library_gallery.png")
     plt.close(fig); print("[fig] fig_library_gallery")
@@ -181,7 +188,6 @@ def fig_training_loss(S):
     ax.axvline(120, ls="--", c="grey", alpha=0.6)
     ax.text(122, max(S["losses"]) * 0.8, "lr drop\n2e-3$\\to$4e-4", fontsize=7)
     ax.set_xlabel("epoch"); ax.set_ylabel("denoising score-matching loss")
-    ax.set_title("Diffusion-model training")
     ax.grid(alpha=0.3, ls=":")
     fig.savefig(FIG / "fig_training_loss.pdf"); fig.savefig(FIG / "fig_training_loss.png")
     plt.close(fig); print("[fig] fig_training_loss")
@@ -206,7 +212,6 @@ def fig_prior_predictive(S):
     ax.set_xscale("log")
     ax.set_xlabel(r"$r$ [pc]"); ax.set_ylabel(r"$\log_{10}\,\rho(r)$ [$M_\odot$ kpc$^{-3}$]")
     ax.axvline(150, ls=":", c="k", alpha=0.5)
-    ax.set_title("Prior-predictive check vs conditional-training reference")
     ax.legend(); ax.grid(alpha=0.3, ls=":")
     fig.savefig(FIG / "fig_prior_predictive.pdf"); fig.savefig(FIG / "fig_prior_predictive.png")
     plt.close(fig); print("[fig] fig_prior_predictive")
