@@ -7,16 +7,6 @@ The package also contains the parametric (gNFW / coreNFW / Burkert) Jeans fits
 and the multi-population GMM split used to expose the density-profile-family
 degeneracy.
 
-Companion code for *"Breaking the density-profile-family degeneracy in dwarf
-galaxies with a learned diffusion prior"* (Wang, MNRAS, submitted).
-
-## Status / scope
-This is a **proof-of-concept**: the diffusion model is a minimal pure-NumPy
-DDPM trained on a physically-motivated synthetic halo library, and the precise
-posterior inner slope is estimator-dependent (see paper §Robustness). The
-model-independent results (the Δγ≈0.4 family swing; the multi-population null)
-are produced by the parametric scripts and stand on their own. The production
-model (trained on FIRE-2/EDGE/Symphony) is a companion paper.
 
 ## Install
 ```bash
